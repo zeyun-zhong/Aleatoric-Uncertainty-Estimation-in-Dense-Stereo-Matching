@@ -1,5 +1,5 @@
-##Aleatoric-Uncertainty-Estimation-in-Dense-Stereo-Matching
-###Abstract
+## Aleatoric-Uncertainty-Estimation-in-Dense-Stereo-Matching
+### Abstract
 The ability to identify erroneous depth estimates is of fundamental interest. Information regarding the aleatoric uncertainty of depth
 estimates can be, for example, used to support the process of depth reconstruction itself. Consequently, various methods for the
 estimation of aleatoric uncertainty in the context of dense stereo matching have been presented in recent years, with deep learning-
@@ -13,8 +13,8 @@ measurements, respectively. To allow a fair comparison, we adapt a common neural
 of the different uncertainty models. In an extensive evaluation using two datasets and two common dense stereo matching methods,
 the proposed methods demonstrate state-of-the-art accuracy.
 
-###Folder structure
-####Train
+### Folder structure
+#### Train
 ```
 train-folder    
 │
@@ -31,7 +31,7 @@ train-folder
     │   ...
 ```
 
-####Test
+#### Test
 ```
 test-folder    
 │
@@ -51,7 +51,7 @@ test-folder
     │   ...
 ```
 
-####Evaluation
+#### Evaluation
 ```
 results-folder    
 │
