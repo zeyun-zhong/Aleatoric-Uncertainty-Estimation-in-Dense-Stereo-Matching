@@ -17,4 +17,4 @@ cd $BIGWORK/CVA/CVA-Net
 module load fosscuda/2019b TensorFlow/2.2.0-Python-3.7.4 matplotlib/3.1.1-Python-3.7.4 OpenCV/4.2.0-Python-3.7.4
 
 # Run GPU application
-python Train-CVA-Net.py --cluster --name 'Mixed_Uniform_mask_pred_paper' --cv_method 'Census-BM' --eta 1.0 --loss_type 'Mixed_Uniform_mask_pred'
+python Train-CVA-Net.py --cluster --name 'Laplacian_Census-BM' --cv_method 'Census-BM' --loss_type 'Laplacian'

@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Conv3D, Flatten, Dense, Dropout, Activation
-from tensorflow.keras.layers import MaxPooling3D, AveragePooling3D, Concatenate, Add, BatchNormalization, GlobalAveragePooling3D
+from tensorflow.keras.layers import MaxPooling3D, AveragePooling3D, Concatenate, Add, BatchNormalization
 
 import params
 
@@ -13,6 +13,20 @@ def nnelu(input):
 
 
 class CVANet():
+    def get_model(self, parameter):
+        inputs, inter_layer = self.get_base_architecture(parameter)
+        if parameter.loss_type == 'Laplacian':
+            predictions = self.get_head_laplacian(parameter, inter_layer)
+        elif 'Geometry' in parameter.loss_type:
+            predictions = self.get_head_geometry(parameter, inter_layer)
+        elif parameter.loss_type == 'Mixture':
+            predictions = self.get_head_mixture(parameter, inter_layer)
+        elif parameter.loss_type == 'GMM':
+            predictions = self.get_head_gmm(parameter, inter_layer)
+        else:
+            raise Exception('Unknown task type: %s' % parameter.task_type)
+        return Model(inputs=inputs, outputs=predictions)
+
     def get_base_architecture(self, parameter):
         inputs = Input(shape=(None, None, parameter.cost_volume_depth, 1))
         inter_layer = inputs
@@ -30,10 +44,7 @@ class CVANet():
         # Depth layers
         depth = 8
         for depth_layers in range(0, parameter.depth_layer_num):
-            if depth_layers < parameter.depth_layer_num - 1:
-                dp_filter_num = parameter.depth_filter_num
-            else:
-                dp_filter_num = parameter.last_dp_filter_num
+            dp_filter_num = parameter.depth_filter_num
             inter_layer = Conv3D(dp_filter_num, (1, 1, depth), padding='same', kernel_initializer='random_normal')(
                 inter_layer)
             inter_layer = BatchNormalization()(inter_layer)
@@ -44,8 +55,6 @@ class CVANet():
 
         # Dense layer - Fully convolutional
         dense_depth = parameter.cost_volume_depth - ((parameter.nb_filter_size - 1) * nb_layer_num)
-        # if parameter.dense_layer_type == 'GAP':
-        #     inter_layer = GlobalAveragePooling3D()(inter_layer)
         if parameter.dense_layer_type == 'FC':
             inter_layer = Conv3D(parameter.dense_filter_num, (1, 1, dense_depth), padding='valid',
                                  kernel_initializer='glorot_normal', activation="relu")(inter_layer)
@@ -62,27 +71,32 @@ class CVANet():
             inter_layer = Dropout(0.5)(inter_layer)
         return inputs, inter_layer
 
-    def get_model(self, parameter):
-        inputs, inter_layer = self.get_base_architecture(parameter)
-        inter_layer = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
+    def get_head_laplacian(self, parameter, inter_layer):
+        unc = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
+        return unc
 
-        if parameter.task_type == 'Classification':
-            predictions = Activation('sigmoid')(inter_layer)
-        elif parameter.task_type == 'Regression':
-            predictions = inter_layer
-        else:
-            raise Exception('Unknown task type: %s' % parameter.task_type)
+    def get_head_geometry(self, parameter, inter_layer):
+        unc = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
+        if 'mask' in parameter.loss_type:
+            region_index = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
+            region_index = Activation('sigmoid')(region_index)
+            return [region_index, unc]
+        return unc
 
-        return Model(inputs=inputs, outputs=predictions)
+    def get_head_mixture(self, parameter, inter_layer):
+        alpha = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
+        alpha = Activation('sigmoid')(alpha)
+        unc_laplacian = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
+        unc_uniform = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
+        return [alpha, unc_laplacian, unc_uniform]
 
-    def get_model_gmm(self, parameter):
-        inputs, inter_layer = self.get_base_architecture(parameter)
-
+    def get_head_gmm(self, parameter, inter_layer):
         # phi: mixture coefficients; mu: mean; s: log variance
         K = parameter.K
         regularizer = None
 
-        phi_layer = Conv3D(K, (1, 1, 1), padding='valid', kernel_initializer=tf.keras.initializers.Constant(value=1/K),
+        phi_layer = Conv3D(K, (1, 1, 1), padding='valid',
+                           kernel_initializer=tf.keras.initializers.Constant(value=1 / K),
                            kernel_regularizer=regularizer)(inter_layer)
         phi_layer = Activation('softmax')(phi_layer)
         mu_layer = Conv3D(K, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal',
@@ -90,28 +104,4 @@ class CVANet():
         s_layer = Conv3D(K, (1, 1, 1), padding='valid', kernel_initializer=tf.keras.initializers.Zeros(),
                          kernel_regularizer=regularizer,
                          activation=None)(inter_layer)
-
-        return Model(inputs=inputs, outputs=[phi_layer, mu_layer, s_layer])
-
-    def get_model_laplacian_uniform(self, parameter):
-        inputs, inter_layer = self.get_base_architecture(parameter)
-
-        alpha_layer = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
-        alpha_layer = Activation('sigmoid')(alpha_layer)
-        s_layer = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
-
-        if parameter.lu_out == 3:
-            s_layer_uniform = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
-
-        outputs = [alpha_layer, s_layer, s_layer_uniform] if parameter.gu_out == 3 else [alpha_layer, s_layer]
-
-        return Model(inputs=inputs, outputs=outputs)
-
-    def get_model_geometry_mask(self, parameter):
-        inputs, inter_layer = self.get_base_architecture(parameter)
-
-        c_layer = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
-        c_layer = Activation('sigmoid')(c_layer)
-        s_layer = Conv3D(1, (1, 1, 1), padding='valid', kernel_initializer='glorot_normal')(inter_layer)
-
-        return Model(inputs=inputs, outputs=[c_layer, s_layer])
+        return [phi_layer, mu_layer, s_layer]

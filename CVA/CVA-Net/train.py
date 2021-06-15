@@ -36,8 +36,11 @@ class Train(ITrainingLoop):
         # ---------------------------
         # Initialise optimiser and metrics
         # ---------------------------
-        self.metrics_object = metrics.Metrics(basic_loss=parameter.loss_type, pos_class_weight=parameter.pos_class_weight,
-                                              gamma=parameter.gamma, eta=parameter.eta)
+        self.metrics_object = metrics.Metrics(basic_loss=parameter.loss_type,
+                                              pos_class_weight=parameter.pos_class_weight,
+                                              gmm_loss_weight=parameter.gmm_loss_weight,
+                                              geometry_loss_weight=parameter.geometry_loss_weight,
+                                              abs_error_prop=parameter.abs_error_prop)
         self.optimizer = tf.keras.optimizers.Adam(lr=parameter.learning_rate)
 
         if parameter.task_type == 'Classification':
@@ -50,12 +53,6 @@ class Train(ITrainingLoop):
 
     def setup_model(self, parameters):
         """ Implementation of the abstract function defined in the base class. """
-        if 'MM' in parameters.loss_type:
-            return graph.CVANet().get_model_gmm(parameters)
-        if 'Gaussian_Uniform' in parameters.loss_type or 'Laplacian_Uniform' in parameters.loss_type:
-            return graph.CVANet().get_model_laplacian_uniform(parameters)
-        if 'mask' in parameters.loss_type:
-            return graph.CVANet().get_model_geometry_mask(parameters)
         return graph.CVANet().get_model(parameters)
 
     def setup_generators(self, parameters):

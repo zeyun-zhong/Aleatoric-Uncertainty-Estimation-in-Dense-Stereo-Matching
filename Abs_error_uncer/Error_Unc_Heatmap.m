@@ -68,13 +68,11 @@ end
 for img_idx=1:length(img_list)
     % Load estimated and ground truth disparity maps and the corresponding
     % uncertainty maps
-    % gt1 = read_pfm(strcat('/home/zeyun/Projects/CVA/stimuli/kitti-2012/training/disp_occ_pfm/', img_list{img_idx}, '.pfm'), 0);
     gt = double(imread(strcat(gt_dir, img_list{img_idx}, '.png')))/gt_norm_factor;
     gt(isinf(gt)|isnan(gt)) = 0;
     
     disp = double(imread(strcat(disp_dir, img_list{img_idx}, '/', disp_name)));
     unc = abs(read_pfm(strcat(disp_dir, img_list{img_idx}, '/', unc_name), 0));
-    %unc = exp(abs(read_pfm(strcat(disp_dir, img_list{img_idx}, '/', unc_name), 0)));
     
     % Compute error per pixel
     error = abs(gt - disp);

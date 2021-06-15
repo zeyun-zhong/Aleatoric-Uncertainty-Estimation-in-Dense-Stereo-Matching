@@ -39,23 +39,8 @@ class Test:
         self.cv_norm = parameter.cv_norm
 
         # Load trained model
-        if 'MM' in self.loss_type:
-            self.model = graph.CVANet().get_model_gmm(parameter)
-        elif 'Gaussian_Uniform' in self.loss_type or 'Laplacian_Uniform' in self.loss_type:
-            self.model = graph.CVANet().get_model_laplacian_uniform(parameter)
-        elif 'mask' in self.loss_type:
-            self.model = graph.CVANet().get_model_geometry_mask(parameter)
-        else:
-            self.model = graph.CVANet().get_model(parameter)
+        self.model = graph.CVANet().get_model(parameter)
         self.model.load_weights(weights_file)
-        # run_meta = tf.compat.v1.RunMetadata()
-        # opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
-
-        # We use the Keras session graph in the call to the profiler.
-        # flops = tf.compat.v1.profiler.profile(graph=tf.compat.v1.keras.backend.get_session().graph,
-        #                                       run_meta=run_meta, cmd='op', options=opts)
-
-        # print(flops.total_float_ops)
 
     def create_cost_volume(self, sample):
         image_left = image_io.read(sample.left_image_path)
@@ -105,19 +90,22 @@ class Test:
             # Process cost volume block-wise to get the confidence map
             print('    Compute confidence map...')
             print('    Loss type: ', self.loss_type)
-            confidence_map = np.zeros((cost_volume_dims[0], cost_volume_dims[1]))
-            start_y = 0
-            end_y = start_y + self.extract_height
+
+            num_of_predicted_values = 1
+            if self.loss_type == 'Mixture':
+                num_of_predicted_values = 3
+            elif self.loss_type == 'Geometry-mask':
+                num_of_predicted_values = 2
 
             # analysis of GMM properties
-            if 'MM' in self.loss_type and self.save_gmm_komponents:
+            if self.loss_type == 'GMM' and self.save_gmm_komponents:
                 phi_map = np.zeros((cost_volume_dims[0], cost_volume_dims[1], 3))
                 mu_map = np.zeros((cost_volume_dims[0], cost_volume_dims[1], 3))
                 sigma_map = np.zeros((cost_volume_dims[0], cost_volume_dims[1], 3)) # variance of GMM komponents
 
-            if 'mask' in self.loss_type:
-                mask_map = np.zeros_like(confidence_map)
-
+            prediction = np.zeros((cost_volume_dims[0], cost_volume_dims[1], num_of_predicted_values))
+            start_y = 0
+            end_y = start_y + self.extract_height
             while (start_y < cost_volume_dims[0]):
                 start_x = 0
                 end_x = start_x + self.extract_width
@@ -132,12 +120,12 @@ class Test:
                     net_input = np.empty((1, extract.shape[0], extract.shape[1], extract.shape[2], 1))
                     net_input[0,:,:,:,0] = extract
 
-                    predictions = np.array(self.model.predict(net_input))
+                    prediction_extract = self.model.predict(net_input)
 
-                    if 'MM' in self.loss_type:
-                        phi = predictions[0][0, :, :, 0, :]
-                        mu = predictions[1][0, :, :, 0, :]
-                        s = predictions[2][0, :, :, 0, :]
+                    if self.loss_type == 'GMM':
+                        phi = prediction_extract[0][0, :, :, 0, :]
+                        mu = prediction_extract[1][0, :, :, 0, :]
+                        s = prediction_extract[2][0, :, :, 0, :]
 
                         # try to solve overflow for sigma
                         index = np.where(phi < gamma_gmm)
@@ -146,44 +134,20 @@ class Test:
                         sigma[index] = 0
                         phi[index] = 0
 
-                        # Todo this function only works for GMM now
                         mean = np.sum(phi * mu, axis=-1)
                         variance = np.sum(phi * (sigma + np.square(mu)), axis=-1) - np.square(mean)
-                        confidence_map[start_y:end_y, start_x:end_x] = np.sqrt(variance)
+                        prediction[start_y:end_y, start_x:end_x, 0] = np.sqrt(variance)
 
                         if self.save_gmm_komponents:
                             phi_map[start_y:end_y, start_x:end_x] = phi
                             mu_map[start_y:end_y, start_x:end_x] = mu
                             sigma_map[start_y:end_y, start_x:end_x] = sigma
-
-                    elif self.loss_type == 'Gaussian_Uniform':
-                        alpha = predictions[0][0, :, :, 0, 0]
-                        s = predictions[1][0, :, :, 0, 0]
-                        if len(predictions) < 3:
-                            var = np.exp(s)
-                        else:
-                            s_u = predictions[2][0, :, :, 0, 0]
-                            var = alpha * np.exp(s) + (1-alpha) * np.exp(s_u)
-                        confidence_map[start_y:end_y, start_x:end_x] = np.sqrt(var)
-
-                    elif self.loss_type == 'Laplacian_Uniform':
-                        alpha = predictions[0][0, :, :, 0, 0]
-                        s = predictions[1][0, :, :, 0, 0]
-                        if len(predictions) < 3:
-                            std = np.exp(s)
-                        else:
-                            s_u = predictions[2][0, :, :, 0, 0]
-                            var = alpha * np.square(np.exp(s)) + (1-alpha) * np.square(np.exp(s_u))
-                            std = np.sqrt(var)
-                        confidence_map[start_y:end_y, start_x:end_x] = std
-
-                    elif 'mask' in self.loss_type:
-                        mask_map[start_y:end_y, start_x:end_x] = predictions[0][0, :, :, 0, 0]
-                        confidence_map[start_y:end_y, start_x:end_x] = predictions[1][0, :, :, 0, 0]
-
-
                     else:
-                        confidence_map[start_y:end_y, start_x:end_x] = predictions[0, :, :, 0, 0]
+                        if num_of_predicted_values > 1:
+                            for i in range(num_of_predicted_values):
+                                prediction[start_y:end_y, start_x:end_x, i] = prediction_extract[i][0, :, :, 0, 0]
+                        else:
+                            prediction[start_y:end_y, start_x:end_x, 0] = prediction_extract[0, :, :, 0, 0]
 
                     start_x = start_x + self.extract_width
                     end_x = start_x + self.extract_width
@@ -191,29 +155,49 @@ class Test:
                 start_y = start_y + self.extract_height
                 end_y = start_y + self.extract_height
 
-            if self.loss_type == 'Probabilistic' or 'Mixed_Uniform' in self.loss_type:
-                confidence_map = np.exp(confidence_map)
+            if self.loss_type == 'Binary_Cross_Entropy':
+                unc_map = prediction[:, :, 0]
 
-            # save mask predictions of geometry-aware model
-            if 'mask' in self.loss_type:
+            elif self.loss_type == 'Laplacian' or self.loss_type == 'Geometry':
+                unc_map = np.exp(prediction[:, :, 0])
+
+            elif self.loss_type == 'Mixture':
+                alpha = prediction[:, :, 0]
+                s_l = prediction[:, :, 1]
+                s_u = prediction[:, :, 2]
+
+                variance_laplace = np.square(np.exp(s_l))
+                variance_uniform = np.square(np.exp(s_u))
+                variance_combined = np.multiply(alpha, variance_laplace) + \
+                                    np.multiply(np.ones_like(alpha) - alpha, variance_uniform)
+                unc_map = np.sqrt(variance_combined)
+
+            elif self.loss_type == 'Geometry-mask':
+                mask_map = prediction[:, :, 0]
+                unc_map = np.exp(prediction[:, :, 1])
                 np.save(sample.result_path + self.model_name + '_mask' + '.npy', mask_map.astype(np.float32))
 
             # save GMM properties
-            if 'MM' in self.loss_type and self.save_gmm_komponents:
-                np.save(sample.result_path + self.model_name + '_phi' + '.npy', phi_map.astype(np.float32))
-                np.save(sample.result_path + self.model_name + '_mu' + '.npy', mu_map.astype(np.float32))
-                np.save(sample.result_path + self.model_name + '_sigma' + '.npy', sigma_map.astype(np.float32))
+            elif self.loss_type == 'GMM':
+                unc_map = prediction[:, :, 0]
+                if self.save_gmm_komponents:
+                    np.save(sample.result_path + self.model_name + '_phi' + '.npy', phi_map.astype(np.float32))
+                    np.save(sample.result_path + self.model_name + '_mu' + '.npy', mu_map.astype(np.float32))
+                    np.save(sample.result_path + self.model_name + '_sigma' + '.npy', sigma_map.astype(np.float32))
+
+            else:
+                raise Exception('Unknown loss type: %s' % self.loss_type)
 
             # Save confidence map
             if self.save_png:
-                confidence_map_visual = confidence_map
+                unc_map_visual = unc_map
 
                 if self.loss_type == 'Binary_Cross_Entropy':
-                    confidence_map_visual = confidence_map_visual * 255
+                    unc_map_visual = unc_map_visual * 255
 
-                confidence_map_visual = confidence_map_visual.astype(int)
-                image_io.write(sample.result_path + 'ConfMap_' + self.model_name + '.png', confidence_map_visual)
-            image_io.write(sample.result_path + 'ConfMap_' + self.model_name + '.pfm', confidence_map.astype(np.float32))
+                unc_map_visual = unc_map_visual.astype(int)
+                image_io.write(sample.result_path + 'ConfMap_' + self.model_name + '.png', unc_map_visual)
+            image_io.write(sample.result_path + 'ConfMap_' + self.model_name + '.pfm', unc_map.astype(np.float32))
 
             # Save disparity map
             if self.save_disp_map:

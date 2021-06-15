@@ -214,7 +214,7 @@ class IDataGenerator(Sequence):
         for row in range(offset[0], dimensions[0], step_size[0]):
             for col in range(offset[1], dimensions[1], step_size[1]):
                 gt_value = disp_gt[row][col]
-                if (gt_value != 0):
+                if gt_value > 0 and gt_value < self.dim[2]:
                     # Ground truth point is available -> Create sample for this pixel
                     est_value = disp_est[row][col] if est_path else None
                     indicator_value = mask_indicator[row][col] if indicator_path else 1
