@@ -40,7 +40,8 @@ class Train(ITrainingLoop):
                                               pos_class_weight=parameter.pos_class_weight,
                                               gmm_loss_weight=parameter.gmm_loss_weight,
                                               geometry_loss_weight=parameter.geometry_loss_weight,
-                                              abs_error_prop=parameter.abs_error_prop)
+                                              using_weighted_loss=parameter.using_weighted_loss,
+                                              weighting_loss_func=parameter.weighting_loss_func)
         self.optimizer = tf.keras.optimizers.Adam(lr=parameter.learning_rate)
 
         if parameter.task_type == 'Classification':

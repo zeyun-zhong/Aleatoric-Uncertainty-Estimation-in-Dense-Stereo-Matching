@@ -1,9 +1,7 @@
 import numpy as np
-import tensorflow as tf
-from tensorflow.keras.models import Model, load_model
 import pickle
 import sys
-import scipy.io
+from tqdm import tqdm
 
 sys.path.insert(1, '../utils')
 import image_io
@@ -36,6 +34,7 @@ class Test:
         self.neighbourhood_size = parameter.nb_size
         self.cost_volume_depth = parameter.cost_volume_depth
         self.loss_type = parameter.loss_type
+        print('    Loss type: ', self.loss_type)
         self.cv_norm = parameter.cv_norm
 
         # Load trained model
@@ -72,25 +71,21 @@ class Test:
         return cv
 
     def predict(self, samples, gamma_gmm=0.01):
-        for idx, sample in enumerate(samples):
-            print('Started sample ' + str(idx+1) + ' of ' + str(len(samples)))
+        for idx, sample in enumerate(tqdm(samples)):
 
             # Compute / load the cost volume (in this example the cost volume is computed based on the Census metric)
             if sample.cost_volume_path:
-                print('    Load cost volume...')
                 cv = self.load_cost_volume(sample)
             else:
-                print('    Compute cost volume...')
                 cv = self.create_cost_volume(sample)
 
             border = int((self.neighbourhood_size - 1) / 2)
             cv_data = cv.get_data(border)
             cost_volume_dims = cv.dim()
+            if cost_volume_dims[-1] != 192:
+                raise Exception('Wrong cost volume depth: %d' % cost_volume_dims[-1])
 
             # Process cost volume block-wise to get the confidence map
-            print('    Compute confidence map...')
-            print('    Loss type: ', self.loss_type)
-
             num_of_predicted_values = 1
             if self.loss_type == 'Mixture':
                 num_of_predicted_values = 3
@@ -158,7 +153,7 @@ class Test:
             if self.loss_type == 'Binary_Cross_Entropy':
                 unc_map = prediction[:, :, 0]
 
-            elif self.loss_type == 'Laplacian' or self.loss_type == 'Geometry':
+            elif self.loss_type == 'Laplacian' or self.loss_type == 'Geometry' or self.loss_type == 'Weighted_Laplacian':
                 unc_map = np.exp(prediction[:, :, 0])
 
             elif self.loss_type == 'Mixture':

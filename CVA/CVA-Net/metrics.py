@@ -1,15 +1,34 @@
 import tensorflow as tf
 import utils
 import math
-# from tensorflow_probability import distributions as tfd
 
 
-def weighting(loss, abs_error, abs_error_prop):
-    ranges = [-1] + list(abs_error_prop.keys())
-    for i in range(1, len(ranges)):
-        condition = tf.logical_and(tf.less_equal(abs_error, ranges[i]), tf.greater(abs_error, ranges[i-1]))
-        loss = tf.where(condition, loss / abs_error_prop[ranges[i]], loss)
-    return loss
+# def weighting_func(loss, abs_error):
+#     weight = 1 / (0.583 - 0.003 * abs_error)
+#     return loss * weight
+#
+#
+# def weighting(loss, abs_error, abs_error_prop):
+#     keys = list(abs_error_prop.keys())
+#     values = list(abs_error_prop.values())
+#     weighted_loss = tf.identity(loss)
+#     eps = 1e-7
+#
+#     if len(abs_error_prop) > 150:
+#         # look up table
+#         initializer = tf.lookup.KeyValueTensorInitializer(keys, values)
+#         table = tf.lookup.StaticHashTable(initializer, default_value=1)
+#
+#         weighted_loss = loss / (table.lookup(tf.cast(abs_error, dtype=tf.int32)) + eps)
+#     else:
+#         # abs error divided in multiple areas
+#         abs_error_prop = dict(sorted(abs_error_prop.items()))
+#         ranges = [-1] + list(abs_error_prop.keys())
+#         for i in range(1, len(ranges)):
+#             condition = tf.logical_and(tf.less_equal(abs_error, ranges[i]), tf.greater(abs_error, ranges[i-1]))
+#             weighted_loss = tf.where(condition, loss / (abs_error_prop[ranges[i]] + eps), weighted_loss)
+#
+#     return weighted_loss
 
 
 def compute_labels(disp_est, disp_gt, treshold_abs=3.0, threshold_rel=0.05):
@@ -38,7 +57,8 @@ class Metrics:
     specified member variables.
     """
 
-    def __init__(self, basic_loss, pos_class_weight=1.0, gmm_loss_weight=1.0, geometry_loss_weight=1.0, abs_error_prop={}):
+    def __init__(self, basic_loss, pos_class_weight=1.0, gmm_loss_weight=1.0, geometry_loss_weight=1.0,
+                 using_weighted_loss=False, weighting_loss_func=None):
         """ Initialisation for the metrics class.
 
         @param basic_loss: String that specifies which kind of loss function should be used.
@@ -51,7 +71,8 @@ class Metrics:
         self.pos_class_weight = pos_class_weight
         self.gmm_loss_weight = gmm_loss_weight
         self.geometry_loss_weight = geometry_loss_weight
-        self.abs_error_prop = abs_error_prop
+        self.using_weighted_loss = using_weighted_loss
+        self.weighting_loss_func = weighting_loss_func
 
     def binary_crossentropy(self, y_true, y_pred):
         """ Computes the binary cross-entropy interpreting the uncertainty prediction as classification task.
@@ -102,20 +123,34 @@ class Metrics:
         loss = tf.abs(tf.abs(tf.squeeze(disp_est) - tf.squeeze(disp_gt)) - tf.abs(tf.squeeze(y_pred)))
         return tf.math.reduce_mean(loss)
 
+    def _weighting_function(self, loss, disp_gt, disp_est, region=''):
+        assert self.weighting_loss_func is not None, 'Weighting function should not be None, if you want to weight loss'
+        abs_error = tf.math.abs(disp_gt - disp_est)
+        weighted_loss = self.weighting_loss_func(loss, abs_error, region=region)
+        return weighted_loss
+
     def laplacian_loss(self, y_true, y_pred):
         disp_est, disp_gt = tf.split(y_true, num_or_size_splits=2, axis=1)
         loss = (math.sqrt(2) * tf.math.abs(tf.squeeze(disp_gt) - tf.squeeze(disp_est)) *
                 tf.math.exp(-tf.squeeze(y_pred))) + tf.squeeze(y_pred)
+
+        if self.using_weighted_loss:
+            weighted_loss = self._weighting_function(loss, tf.squeeze(disp_gt), tf.squeeze(disp_est), region='all')
+            # tf.print(loss[:3], disp_gt[:3], disp_est[:3], weighted_loss[:3])
+            return tf.math.reduce_mean(weighted_loss)
+
         return tf.math.reduce_mean(loss)
 
-    def weighted_laplacian_loss(self, y_true, y_pred):
-        disp_est, disp_gt = tf.split(y_true, num_or_size_splits=2, axis=1)
-        disp_est, disp_gt, y_pred = tf.squeeze(disp_est), tf.squeeze(disp_gt), tf.squeeze(y_pred)
-        abs_error = tf.math.abs(disp_gt - disp_est)
-        loss = (math.sqrt(2) * abs_error * tf.math.exp(-y_pred)) + y_pred
-        weighted_loss = weighting(loss, abs_error, self.abs_error_prop)
-        # tf.print(tf.reduce_mean(loss), tf.reduce_mean(weighted_loss))
-        return tf.math.reduce_mean(weighted_loss)
+    # def weighted_laplacian_loss(self, y_true, y_pred):
+    #     assert self.weighting_loss_func, 'Weighting loss function is None!'
+    #     disp_est, disp_gt = tf.split(y_true, num_or_size_splits=2, axis=1)
+    #     disp_est, disp_gt, y_pred = tf.squeeze(disp_est), tf.squeeze(disp_gt), tf.squeeze(y_pred)
+    #     abs_error = tf.math.abs(disp_gt - disp_est)
+    #     loss = (math.sqrt(2) * abs_error * tf.math.exp(-y_pred)) + y_pred
+    #     weighted_loss = self.weighting_loss_func(loss, abs_error)
+    #     # weighted_loss = weighting(loss, abs_error, self.abs_error_prop)
+    #     # tf.print(tf.reduce_mean(loss), tf.reduce_mean(weighted_loss))
+    #     return tf.math.reduce_mean(weighted_loss)
 
     def geometry_loss(self, y_true, y_pred):
         disp_est, disp_gt, indicators = tf.split(y_true, num_or_size_splits=3, axis=1)
@@ -133,6 +168,13 @@ class Metrics:
         loss_tmp = tf.where(tf.equal(indicators, 1), loss_good, diff_1_abs - 0.5)
         condition = tf.logical_and(tf.equal(indicators, 0), tf.less(diff_1_abs, 1.0))
         loss = tf.where(condition, 0.5 * tf.square(diff_1), loss_tmp)
+
+        if self.using_weighted_loss:
+            weighted_loss_good = self._weighting_function(loss, disp_gt, disp_est, region='good')
+            weighted_loss_hard = self._weighting_function(loss, disp_gt, disp_est, region='hard')
+            weighted_loss = tf.where(tf.equal(indicators, 1), weighted_loss_good, weighted_loss_hard)
+            return tf.math.reduce_mean(weighted_loss)
+
         return tf.math.reduce_mean(loss)
 
     def geometry_mask_loss(self, y_true, y_pred):
@@ -205,8 +247,8 @@ class Metrics:
                 loss = self.weighted_binary_crossentropy(y_true, y_pred)
             elif self.basic_loss == 'Laplacian':
                 loss = self.laplacian_loss(y_true, y_pred)
-            elif self.basic_loss == 'Weighted_Laplacian':
-                loss = self.weighted_laplacian_loss(y_true, y_pred)
+            # elif self.basic_loss == 'Weighted_Laplacian':
+            #     loss = self.weighted_laplacian_loss(y_true, y_pred)
             elif self.basic_loss == 'Residual':
                 loss = self.residual_loss(y_true, y_pred)
             elif self.basic_loss == 'Residual_Abs':

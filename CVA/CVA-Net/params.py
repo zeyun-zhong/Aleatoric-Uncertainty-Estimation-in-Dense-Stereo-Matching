@@ -29,9 +29,33 @@ class Params():
         self.num_gaussian_comp = 3
         self.gmm_loss_weight = 1.0
 
-        # proportion of abs disparity error (GC-Net)
-        self.abs_error_prop = {3: 0.9689, 10: 0.024, 50: 0.0067, float('inf'): 0.0004} # KITTI 2012
+        # weighted regression
+        self.using_weighted_loss = False
+        self.using_lookup = False
+        self.weighting_loss_func = None
 
+        # proportion of abs disparity error (GC-Net)
+        # self.abs_error_prop = {3: 0.9689, 10: 0.024, 50: 0.0067, float('inf'): 0.0004} # KITTI 2012
+
+        self.data_path_suffix = {
+            'K12': 'stimuli/kitti-2012/training/',
+            'K15': 'stimuli/kitti-2015/training/',
+            'M3': 'stimuli/middlebury-v3/',
+            'Sceneflow': 'stimuli/sceneflow/'
+        }
+
+        self.cv_path_suffix = {
+            'Census-BM': 'Census-BM/cost_volumes/',
+            'MC-CNN': 'MC-CNN/cost_volumes/',
+            'GC-Net': 'GC-Net/cost_volumes/'
+        }
+
+        self.cv_norms = {
+            'Census-BM': [0.0, 1.0],
+            'MC-CNN': [1.0, 0.5],
+            'GC-Net': [37.37, 0.00817],
+            ('GC-Net', 'Sceneflow'): [33.29, 0.0064]
+        }
 
         # Data
         self.training_data = ''

@@ -15,7 +15,7 @@ def nnelu(input):
 class CVANet():
     def get_model(self, parameter):
         inputs, inter_layer = self.get_base_architecture(parameter)
-        if parameter.loss_type == 'Laplacian':
+        if parameter.loss_type == 'Laplacian' or parameter.loss_type == 'Weighted_Laplacian':
             predictions = self.get_head_laplacian(parameter, inter_layer)
         elif 'Geometry' in parameter.loss_type:
             predictions = self.get_head_geometry(parameter, inter_layer)
@@ -24,7 +24,7 @@ class CVANet():
         elif parameter.loss_type == 'GMM':
             predictions = self.get_head_gmm(parameter, inter_layer)
         else:
-            raise Exception('Unknown task type: %s' % parameter.task_type)
+            raise Exception('Unknown loss type: %s' % parameter.loss_type)
         return Model(inputs=inputs, outputs=predictions)
 
     def get_base_architecture(self, parameter):
